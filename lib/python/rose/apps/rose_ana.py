@@ -38,6 +38,7 @@ from rose.resource import ResourceLocator
 from rose.app_run import BuiltinApp
 
 WARN = -1
+SKIP = -2
 PASS = 0
 FAIL = 1
 
@@ -182,6 +183,25 @@ class DataLengthError(Exception):
     __str__ = __repr__
 
 
+class MissingFileError(Exception):
+
+    """An exception if KGO and result files are missing."""
+
+    def __init__(self, task):
+        self.resultfile = task.resultfile
+        self.kgo1file = task.kgo1file
+        self.taskname = task.name
+        self.extract = task.extract
+
+    def __repr__(self):
+        return " %s : %s: %s: %s " % (
+                self.extract, self.taskname,
+                self.resultfile, self.kgo1file
+                )
+
+    __str__ = __repr__
+
+
 class TaskCompletionEvent(Event):
 
     """Event for completing a comparison from AnalysisTask."""
@@ -240,15 +260,43 @@ class Analyse(object):
         rc = 0
         for task in self.tasks:
 
+            kgos = []
+            task.filesread = {task.resultfile: False}
+            for i in range(task.numkgofiles):
+                kgos.append("kgo" + str(i + 1))
+                filename = getattr(task, kgos[i] + "file")
+                task.filesread[filename] = False
+
+            for filename, _ in task.filesread.items():
+                try:
+                    with open(filename, 'r'):
+                        task.filesread[filename] = True
+                    if task.allmissingskip:
+                        self.reporter(filename,
+                                      prefix='Unexpected file found: '
+                                      )
+                except IOError:
+                    if not task.allmissingskip:
+                        self.reporter(filename,
+                                      prefix='File not found: '
+                                      )
+            print 'checked files: ', task.filesread
+
+            readcase = all(not value for value in task.filesread.values())
+            if readcase and task.allmissingskip:
+                task.set_skip(MissingFileError(task))
+                self.reporter(TaskCompletionEvent(task),
+                              prefix="[%s]" % (task.userstatus))
+                continue
+
             if self.check_extract(task):
                 # Internal AnalysisEngine extract+comparison test
 
                 # Extract data from results and from kgoX
                 task = self.do_extract(task, "result")
 
-                for i in range(task.numkgofiles):
-                    var = "kgo" + str(i + 1)
-                    task = self.do_extract(task, var)
+                for kgo in kgos:
+                    task = self.do_extract(task, kgo)
 
                 task = self.do_comparison(task)
             else:
@@ -328,7 +376,8 @@ class Analyse(object):
         filename = ''
         if var:
             filename = getattr(task, var + "file")
-        expansions = {'resultfile': task.resultfile, 'file': filename}
+        expansions = {'resultfile': task.resultfile,
+                      'file': filename}
         for i in range(1, task.numkgofiles + 1):
             key = "kgo" + str(i) + "file"
             value = getattr(task, key)
@@ -388,7 +437,11 @@ class Analyse(object):
             newtask.comparison = self.config.get_value([task, "comparison"])
             newtask.tolerance = self.config.get_value([task, "tolerance"])
             newtask.warnonfail = (
-                self.config.get_value([task, "warnonfail"]) in ["yes", "true"])
+                    self.config.get_value([task, "warnonfail"]) in
+                    ["yes", "true"])
+            newtask.allmissingskip = (
+                    self.config.get_value([task, "allmissingskip"]) in
+                    ["yes", "true"])
 
             # Allow for multiple KGO, e.g. kgo1file, kgo2file, for
             # statistical comparisons of results
@@ -399,9 +452,8 @@ class Analyse(object):
                 if self.config.get([task, kgofilevar]):
                     value = self.config.get([task, kgofilevar])[:]
                     if "{}" in value:
-                        setattr(
-                            newtask, kgofilevar,
-                            value.replace("{}", self.args[0]))
+                        setattr(newtask, kgofilevar, value.replace(
+                                "{}", self.args[0]))
                     else:
                         setattr(newtask, kgofilevar, value)
                     newtask.numkgofiles += 1
@@ -437,7 +489,8 @@ class Analyse(object):
             contents = inspect.getmembers(module, inspect.isclass)
             for obj_name, obj in contents:
                 att_name = "run"
-                if hasattr(obj, att_name) and callable(getattr(obj, att_name)):
+                if (hasattr(obj, att_name) and
+                        callable(getattr(obj, att_name))):
                     doc_string = obj.__doc__
                     user_methods.append((comparison_name, obj_name, att_name,
                                         doc_string))
@@ -468,6 +521,8 @@ class Analyse(object):
                 config.set([sectionname, "tolerance"], task.tolerance)
             if task.warnonfail:
                 config.set([sectionname, "warnonfail"], "true")
+            if task.allmissingskip:
+                config.set([sectionname, "allmissingskip"], "true")
         rose.config.dump(config, filename)
 
 
@@ -484,6 +539,7 @@ class AnalysisTask(object):
         subextract              # Extract sub-type (if any)
         tolerance               # Tolerance (optional in file)
         warnonfail              # True if failure is just a warning
+        allmissingskip          # skip task if all files missing
         numkgofiles             # Number of KGO files
         resultdata              # Data from result file
         kgo1data                # Data from KGO file
@@ -491,6 +547,7 @@ class AnalysisTask(object):
         message                 # User message
         userstatus              # User status
         numericstatus           # Numeric status
+        filesread               # Dictionary of resultfile and kgoXfiles
     """
 
     def __init__(self):
@@ -503,27 +560,29 @@ class AnalysisTask(object):
         self.extract = None
         self.tolerance = None
         self.warnonfail = False
+        self.allmissingskip = False
         self.numkgofiles = 0
+        self.filesread = {}
 
-# Variables to save settings before environment variable expansion (for
-# writing back to config file, rerunning, etc)
+        # Variables to save settings before environment variable expansion (for
+        # writing back to config file, rerunning, etc)
         self.resultfileconfig = self.resultfile
         self.kgofileconfig = self.kgo1file
 
-# Data variables filled by extract methods
+        # Data variables filled by extract methods
         self.resultdata = []
         self.kgo1data = []
 
-# Variables set by comparison methods
+        # Variables set by comparison methods
         self.ok = False
 
         self.message = None
         self.userstatus = "UNTESTED"
         self.numericstatus = WARN
 
-# Methods for setting pass/fail/warn; all take an object of one of the
-# success/ failure/warning classes as an argument, which all have a sensible
-# user message as the string representation of them.
+        # Methods for setting pass/fail/warn; all take an object of one of the
+        # success/ failure/warning classes as an argument, which all have a
+        # sensible user message as the string representation of them.
     def set_failure(self, message):
         """Sets the status of the task to "FAIL"."""
 
@@ -550,6 +609,14 @@ class AnalysisTask(object):
         self.message = message
         self.userstatus = "WARN"
         self.numericstatus = WARN
+
+    def set_skip(self, message):
+        """Sets the status of the task to "SKIP"."""
+
+        self.ok = True
+        self.message = message
+        self.userstatus = "SKIP"
+        self.numericstatus = SKIP
 
     def __repr__(self):
         return "%s: %s" % (self.name, self.userstatus)
