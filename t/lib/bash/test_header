@@ -1,6 +1,6 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -404,8 +404,10 @@ for item in sys.argv[2:]:
             else:
                 datum = datum[key]
         if datum != value:
-            raise ValueError(item)
-    except (IndexError, KeyError):
+            raise ValueError((item, datum))
+    except IndexError:
+        raise IndexError(item)
+    except KeyError:
         raise KeyError(item)
 __PYTHON__
     if [[ -s "${TEST_KEY}.err" ]]; then

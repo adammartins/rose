@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -121,6 +121,7 @@ ERROR_NO_NEXT_SEARCH = "No next search"
 ERROR_NO_PREVIOUS_SEARCH = "No previous search"
 ERROR_PERMISSIONS = ("Error: You do not have the required permissions to " +
                      "delete this suite")
+ERROR_PREFIX_UNREACHABLE = "Cannot connect to prefix(es) {0}"
 ERROR_UNRECOGNISED_LAST_SEARCH = "Unrecognised last search type"
 ERROR_UNRECOGNISED_NEXT_SEARCH = "Unrecognised next search type"
 ERROR_UNRECOGNISED_SEARCH = "Unrecognised search type"
@@ -242,7 +243,7 @@ TITLE_INVALID_PREFIX = "Error"
 TITLE_INVALID_QUERY = "Error"
 
 # Miscellaneous
-COPYRIGHT = "(C) British Crown Copyright 2012-5 Met Office."
+COPYRIGHT = "(C) British Crown Copyright 2012-6 Met Office."
 DEFAULT_FILTER_EXPR = "eq"
 DEFAULT_QUERY = "list_my_suites"
 DELIM_KEYVAL = ": "

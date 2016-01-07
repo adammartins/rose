@@ -1,6 +1,6 @@
 #!/bin/bash
 #-------------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -27,7 +27,7 @@ MORE_HOST=$(rose config --default= 't' 'job-host-with-share')
 export ROSE_CONF_PATH=
 
 LOCAL_HOSTS='localhost 127.0.0.1'
-for CMD in 'hostname -s' 'hostname' 'hostname --fqdn' 'hostname -i'; do
+for CMD in 'hostname -s' 'hostname' 'hostname --fqdn' 'hostname -I'; do
     if LOCAL_HOST=$(eval "$CMD"); then
         LOCAL_HOSTS="${LOCAL_HOSTS} ${LOCAL_HOST}"
     fi

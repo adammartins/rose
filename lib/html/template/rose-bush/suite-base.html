@@ -17,7 +17,12 @@ rel="stylesheet" media="screen" />
 <body>
 <div class="navbar navbar-static-top">
 <div class="navbar-inner">
-<a class="brand" href="{{script}}/">{{title}} <small>@ {{host}}</small></a>
+<a class="brand" href="{{script}}/">
+{% if logo -%}
+<img {{logo}} />
+{% endif -%}
+{{title}} <small>@ {{host}}</small>
+</a>
 <ul class="nav">
 <li><a href="{{script}}/suites/{{user}}">{{user}}</a></li>
 <li><a><strong>{{suite}}</strong></a></li>
@@ -72,28 +77,6 @@ role="dialog" aria-labelledby="suite-info-label" aria-hidden="true">
 </div>
 </li>
 {% endif -%}
-{% if states is defined %}
-{% if states.is_failed -%}
-<li><a><span class="label label-important">
-<i class="icon-warning-sign icon-white" title="failed task(s)"></i>
-</span></a></li>
-{% endif -%}
-{% if states.is_running -%}
-<li><a><span class="label label-info">
-<i class="icon-play icon-white" title="running"></i></span>
-{% if states.last_activity_time -%}
-<abbr class="livestamp" title=
-"{{states.last_activity_time}}">{{states.last_activity_time}}</abbr>
-{% endif -%}
-</a></li>
-{% elif states.last_activity_time -%}
-<li><a>
-<i class="icon-stop" title="last active"></i>
-<abbr class="livestamp" title=
-"{{states.last_activity_time}}">{{states.last_activity_time}}</abbr>
-</a></li>
-{% endif -%}
-{% endif %}
 </ul>
 {% if path is defined %}
 {% include "view-mode.html" %}

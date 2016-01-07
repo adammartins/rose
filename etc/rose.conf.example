@@ -1,5 +1,5 @@
 #-------------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -119,6 +119,12 @@
 #  jobs-per-page=15
 ## Job list view: maximum number of jobs per page
 #  jobs-per-page-max=300
+## Image logo attributes, can be any HTML <img/> tag attributes
+## logo=HTML-IMG-ATTRIBUTE ...
+## E.g.:
+#  logo=src="http://server/my-rose-bush-logo.png" alt="My Rose Bush Logo"
+## Suites list view: default number of suites per page
+#  suites-per-page=100
 ## An alternate service title (Default="Rose Bush")
 ## title=TITLE
 ## E.g.:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -53,12 +53,14 @@ class RoseBushService(object):
     CYCLES_PER_PAGE = 100
     JOBS_PER_PAGE = 15
     JOBS_PER_PAGE_MAX = 300
+    SUITES_PER_PAGE = 100
     VIEW_SIZE_MAX = 10 * 1024 * 1024  # 10MB
 
     def __init__(self, *args, **kwargs):
         self.exposed = True
         self.suite_engine_proc = SuiteEngineProcessor.get_processor()
         rose_conf = ResourceLocator.default().get_conf()
+        self.logo = rose_conf.get_value(["rose-bush", "logo"])
         self.title = rose_conf.get_value(["rose-bush", "title"], self.TITLE)
         self.host_name = rose_conf.get_value(["rose-bush", "host"])
         if self.host_name is None:
@@ -76,6 +78,7 @@ class RoseBushService(object):
         """Display a page to input user ID and suite ID."""
         # TODO: some way to allow autocomplete of user field?
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "rose_version": self.rose_version,
@@ -93,12 +96,14 @@ class RoseBushService(object):
         """List current broadcasts of a running or completed suite."""
         user_suite_dir = self._get_user_suite_dir(user, suite)
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "user": user,
             "suite": suite,
             "rose_version": self.rose_version,
             "script": cherrypy.request.script_name,
+            "method": "broadcast_states",
             "states": {},
             "time": strftime("%Y-%m-%dT%H:%M:%S+0000", gmtime()),
         }
@@ -121,12 +126,14 @@ class RoseBushService(object):
         """List broadcasts history of a running or completed suite."""
         user_suite_dir = self._get_user_suite_dir(user, suite)
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "user": user,
             "suite": suite,
             "rose_version": self.rose_version,
             "script": cherrypy.request.script_name,
+            "method": "broadcast_events",
             "states": {},
             "time": strftime("%Y-%m-%dT%H:%M:%S+0000", gmtime())
         }
@@ -145,38 +152,44 @@ class RoseBushService(object):
         return simplejson.dumps(data)
 
     @cherrypy.expose
-    def cycles(self, user, suite, page=1, order=None, cycles=None,
-               per_page=None, form=None):
+    def cycles(
+            self, user, suite, page=1, order=None, per_page=None, form=None):
         """List cycles of a running or completed suite."""
         user_suite_dir = self._get_user_suite_dir(user, suite)
+        conf = ResourceLocator.default().get_conf()
+        per_page_default = int(conf.get_value(
+            ["rose-bush", "cycles-per-page"], self.CYCLES_PER_PAGE))
         if not isinstance(per_page, int):
             if per_page:
                 per_page = int(per_page)
             else:
-                conf = ResourceLocator.default().get_conf()
-                per_page = int(conf.get_value(
-                    ["rose-bush", "cycles-per-page"], self.CYCLES_PER_PAGE))
+                per_page = per_page_default
         if page and per_page:
             page = int(page)
         else:
             page = 1
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "user": user,
             "suite": suite,
-            "cycles": cycles,
+            "is_option_on": (
+                order is not None and order != "time_desc" or
+                per_page is not None and per_page != per_page_default
+            ),
             "order": order,
             "rose_version": self.rose_version,
             "script": cherrypy.request.script_name,
+            "method": "cycles",
             "states": {},
             "per_page": per_page,
+            "per_page_default": per_page_default,
             "page": page,
         }
-        data["offset"] = (page - 1) * per_page
         data["entries"], data["of_n_entries"] = (
             self.suite_engine_proc.get_suite_cycles_summary(
-                user, suite, order, per_page, data["offset"]))
+                user, suite, order, per_page, (page - 1) * per_page))
         if per_page:
             data["n_pages"] = data["of_n_entries"] / per_page
             if data["of_n_entries"] % per_page != 0:
@@ -215,11 +228,17 @@ class RoseBushService(object):
                      The values in the list should be "active", "success" or
                      "fail".
         order -- Order search in a predetermined way. A valid value is one of
-                 "time_desc", "time_asc","cycle_desc_name_desc",
-                 "cycle_desc_name_asc", "cycle_asc_name_desc",
-                 "cycle_asc_name_asc", "name_asc_cycle_asc",
-                 "name_desc_cycle_asc", "name_asc_cycle_desc",
-                 "name_desc_cycle_desc".
+            "time_desc", "time_asc",
+            "cycle_desc_name_desc", "cycle_desc_name_asc",
+            "cycle_asc_name_desc", "cycle_asc_name_asc",
+            "name_asc_cycle_asc", "name_desc_cycle_asc",
+            "name_asc_cycle_desc", "name_desc_cycle_desc",
+            "time_submit_desc", "time_submit_asc",
+            "time_run_desc", "time_run_asc",
+            "time_run_exit_desc", "time_run_exit_asc",
+            "duration_queue_desc", "duration_queue_asc",
+            "duration_run_desc", "duration_run_asc",
+            "duration_queue_run_desc", "duration_queue_run_asc"
         per_page -- Number of entries to display per page (defualt=32)
         form -- Specify return format. If None, display HTML page. If "json",
                 return a JSON data structure.
@@ -236,7 +255,7 @@ class RoseBushService(object):
             tasks or
             no_status is not None or
             order is not None and order != "time_desc" or
-            per_page and per_page != per_page_default
+            per_page is not None and per_page != per_page_default
         )
         if not isinstance(per_page, int):
             if per_page:
@@ -251,6 +270,7 @@ class RoseBushService(object):
         if no_status and not isinstance(no_status, list):
             no_statuses = [no_status]
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "user": user,
@@ -266,6 +286,7 @@ class RoseBushService(object):
             "page": page,
             "rose_version": self.rose_version,
             "script": cherrypy.request.script_name,
+            "method": "jobs",
             "states": {},
         }
         # TODO: add paths to other suite files
@@ -276,10 +297,9 @@ class RoseBushService(object):
         data.update(self._get_suite_logs_info(user, suite))
         data["states"].update(
             self.suite_engine_proc.get_suite_state_summary(user, suite))
-        data["offset"] = (page - 1) * per_page
         entries, of_n_entries = self.suite_engine_proc.get_suite_job_events(
             user, suite, cycles, tasks, no_statuses, order, per_page,
-            data["offset"])
+            (page - 1) * per_page)
         data["entries"] = entries
         data["of_n_entries"] = of_n_entries
         if per_page:
@@ -304,7 +324,8 @@ class RoseBushService(object):
                          per_page, form)
 
     @cherrypy.expose
-    def suites(self, user, form=None):
+    def suites(self, user, names=None, page=1, order=None, per_page=None,
+               form=None):
         """List (installed) suites of a user.
 
         user -- A string containing a valid user ID
@@ -313,46 +334,100 @@ class RoseBushService(object):
 
         """
         user_suite_dir_root = self._get_user_suite_dir_root(user)
+        conf = ResourceLocator.default().get_conf()
+        per_page_default = int(conf.get_value(
+            ["rose-bush", "suites-per-page"], self.SUITES_PER_PAGE))
+        if not isinstance(per_page, int):
+            if per_page:
+                per_page = int(per_page)
+            else:
+                per_page = per_page_default
+        if page and per_page:
+            page = int(page)
+        else:
+            page = 1
         data = {
+            "logo": self.logo,
             "title": self.title,
             "host": self.host_name,
             "rose_version": self.rose_version,
             "script": cherrypy.request.script_name,
+            "method": "suites",
             "user": user,
-            "entries": []}
-        if os.path.isdir(user_suite_dir_root):
-            for name in os.listdir(user_suite_dir_root):
-                suite_conf = os.path.join(user_suite_dir_root, name,
-                                          self.suite_engine_proc.SUITE_CONF)
-                job_logs_db = os.path.join(user_suite_dir_root, name,
-                                           self.suite_engine_proc.JOB_LOGS_DB)
-                if (not os.path.exists(job_logs_db) and
-                        not os.path.exists(suite_conf)):
-                    continue
-                suite_db = os.path.join(user_suite_dir_root, name,
-                                        self.suite_engine_proc.SUITE_DB)
-                try:
-                    last_activity_time = strftime(
-                        "%Y-%m-%dT%H:%M:%S+0000",
-                        gmtime(os.stat(suite_db).st_mtime))
-                except OSError:
-                    last_activity_time = None
-                entry = {"name": name, "info": {},
-                         "last_activity_time": last_activity_time}
-                data["entries"].append(entry)
-                rose_suite_info = os.path.join(user_suite_dir_root, name,
-                                               "rose-suite.info")
-                if os.access(rose_suite_info, os.F_OK | os.R_OK):
-                    try:
-                        info_root = rose.config.load(rose_suite_info)
-                        for key, node in info_root.value.items():
-                            if (node.is_ignored() or
-                                    not isinstance(node.value, str)):
-                                continue
-                            entry["info"][key] = node.value
-                    except rose.config.ConfigSyntaxError as err:
-                        pass
+            "is_option_on": (
+                names and shlex.split(str(names)) != ["*"] or
+                order is not None and order != "time_desc" or
+                per_page is not None and per_page != per_page_default
+            ),
+            "names": names,
+            "page": page,
+            "order": order,
+            "per_page": per_page,
+            "per_page_default": per_page_default,
+            "entries": [],
+        }
+        name_globs = ["*"]
+        if names:
+            name_globs = shlex.split(str(names))
+        # Get entries
+        try:
+            items = os.listdir(user_suite_dir_root)
+        except OSError:
+            items = []
+        for item in items:
+            if not any([fnmatch(item, glob_) for glob_ in name_globs]):
+                continue
+            user_suite_dir = os.path.join(user_suite_dir_root, item)
+            suite_conf = os.path.join(
+                user_suite_dir, self.suite_engine_proc.SUITE_CONF)
+            job_logs_db = os.path.join(
+                user_suite_dir, self.suite_engine_proc.JOB_LOGS_DB)
+            if (not os.path.exists(job_logs_db) and
+                    not os.path.exists(suite_conf)):
+                continue
+            suite_db = os.path.join(
+                user_suite_dir, self.suite_engine_proc.SUITE_DB)
+            try:
+                last_activity_time = strftime(
+                    "%Y-%m-%dT%H:%M:%S+0000",
+                    gmtime(os.stat(suite_db).st_mtime))
+            except OSError:
+                last_activity_time = None
+            data["entries"].append({
+                "name": item,
+                "info": {},
+                "last_activity_time": last_activity_time})
+
+        if order == "name_asc":
+            data["entries"].sort(key=lambda entry: entry["name"])
+        elif order == "name_desc":
+            data["entries"].sort(key=lambda entry: entry["name"], reverse=True)
+        elif order == "time_asc":
+            data["entries"].sort(self._sort_summary_entries, reverse=True)
+        else:  # order == "time_desc"
             data["entries"].sort(self._sort_summary_entries)
+        data["of_n_entries"] = len(data["entries"])
+        if per_page:
+            data["n_pages"] = data["of_n_entries"] / per_page
+            if data["of_n_entries"] % per_page != 0:
+                data["n_pages"] += 1
+            offset = (page - 1) * per_page
+            data["entries"] = data["entries"][offset:offset + per_page]
+        else:
+            data["n_pages"] = 1
+        # Get suite info for each entry
+        for entry in data["entries"]:
+            user_suite_dir = os.path.join(user_suite_dir_root, entry["name"])
+            rose_suite_info = os.path.join(user_suite_dir, "rose-suite.info")
+            try:
+                info_root = rose.config.load(rose_suite_info)
+                for key, node in info_root.value.items():
+                    if (node.is_ignored() or
+                            not isinstance(node.value, str)):
+                        continue
+                    entry["info"][key] = node.value
+            except (IOError, rose.config.ConfigSyntaxError):
+                pass
         data["time"] = strftime("%Y-%m-%dT%H:%M:%S+0000", gmtime())
         if form == "json":
             return simplejson.dumps(data)
@@ -445,7 +520,9 @@ class RoseBushService(object):
         return template.render(
             rose_version=self.rose_version,
             script=cherrypy.request.script_name,
+            method="view",
             time=strftime("%Y-%m-%dT%H:%M:%S+0000", gmtime()),
+            logo=self.logo,
             title=self.title,
             host=self.host_name,
             user=user,

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # -----------------------------------------------------------------------------
-# (C) British Crown Copyright 2012-5 Met Office.
+# (C) British Crown Copyright 2012-6 Met Office.
 #
 # This file is part of Rose, a framework for meteorological suites.
 #
@@ -65,7 +65,7 @@ class CylcProcessor(SuiteEngineProcessor):
     EVENT_RANKS = {"submit-init": 0, "submit": 1, "fail(submit)": 1, "init": 2,
                    "success": 3, "fail": 3, "fail(%s)": 4}
     JOB_LOGS_DB = "log/rose-job-logs.db"
-    JOB_ORDERS = {
+    JOB_ORDERS_OLD = {
         "time_desc": "time DESC, submit_num DESC, name DESC, cycle DESC",
         "time_asc": "time ASC, submit_num ASC, name ASC, cycle ASC",
         "cycle_desc_name_asc": "cycle DESC, name ASC, submit_num DESC",
@@ -76,6 +76,45 @@ class CylcProcessor(SuiteEngineProcessor):
         "name_desc_cycle_asc": "name DESC, cycle ASC, submit_num DESC",
         "name_asc_cycle_desc": "name ASC, cycle DESC, submit_num DESC",
         "name_desc_cycle_desc": "name DESC, cycle DESC, submit_num DESC"}
+    JOB_ORDERS = dict(JOB_ORDERS_OLD)
+    JOB_ORDERS.update({
+        "time_submit_desc": (
+            "time_submit DESC, submit_num DESC, name DESC, cycle DESC"),
+        "time_submit_asc": (
+            "time_submit ASC, submit_num DESC, name DESC, cycle DESC"),
+        "time_run_desc": (
+            "time_run DESC, submit_num DESC, name DESC, cycle DESC"),
+        "time_run_asc": (
+            "time_run ASC, submit_num DESC, name DESC, cycle DESC"),
+        "time_run_exit_desc": (
+            "time_run_exit DESC, submit_num DESC, name DESC, cycle DESC"),
+        "time_run_exit_asc": (
+            "time_run_exit ASC, submit_num DESC, name DESC, cycle DESC"),
+        "duration_queue_desc": (
+            "(CAST(strftime('%s', time_run) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_submit) AS NUMERIC)) DESC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+        "duration_queue_asc": (
+            "(CAST(strftime('%s', time_run) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_submit) AS NUMERIC)) ASC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+        "duration_run_desc": (
+            "(CAST(strftime('%s', time_run_exit) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_run) AS NUMERIC)) DESC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+        "duration_run_asc": (
+            "(CAST(strftime('%s', time_run_exit) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_run) AS NUMERIC)) ASC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+        "duration_queue_run_desc": (
+            "(CAST(strftime('%s', time_run_exit) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_submit) AS NUMERIC)) DESC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+        "duration_queue_run_asc": (
+            "(CAST(strftime('%s', time_run_exit) AS NUMERIC) -" +
+            " CAST(strftime('%s', time_submit) AS NUMERIC)) ASC, " +
+            "submit_num DESC, name DESC, cycle DESC"),
+    })
     PGREP_CYLC_RUN = r"python.*cylc-(run|restart)( | .+ )%s( |$)"
     REASON_KEY_PROC = "process"
     REASON_KEY_FILE = "port-file"
@@ -313,7 +352,7 @@ class CylcProcessor(SuiteEngineProcessor):
             for no_status in no_statuses:
                 statuses = self.STATUSES.get(no_status, [])
                 where_exprs.append(
-                    " OR ".join(["status != ?"] * len(statuses)))
+                    " AND ".join(["status != ?"] * len(statuses)))
                 where_args += statuses
         if where_exprs:
             where_expr = " WHERE (" + ") AND (".join(where_exprs) + ")"
@@ -403,7 +442,11 @@ class CylcProcessor(SuiteEngineProcessor):
             prefix += user_name
         user_suite_dir = os.path.expanduser(os.path.join(
             prefix, self.get_suite_dir_rel(suite_name)))
-        current_cycles = os.listdir(os.path.join(user_suite_dir, "log", "job"))
+        try:
+            current_cycles = os.listdir(
+                os.path.join(user_suite_dir, "log", "job"))
+        except OSError:
+            current_cycles = []
         targzip_cycles = []
         for name in glob(os.path.join(user_suite_dir, "log", "job-*.tar.gz")):
             targzip_cycles.append(os.path.basename(name)[4:-7])
@@ -447,6 +490,40 @@ class CylcProcessor(SuiteEngineProcessor):
         self._db_close(self.SUITE_DB, user_name, suite_name)
 
         for entry in entries:
+            # job.out and job.err are expected for completed jobs
+            for filename in ["job.out", "job.err"]:
+                if (filename in entry["logs"] or
+                        entry["status"] not in ["success", "fail"]):
+                    continue
+                path = os.path.join(
+                    "log", "job",
+                    "%(cycle)s/%(name)s/%(submit_num)02d" % entry,
+                    filename)
+                mtime = "?"
+                size = "?"
+                if entry["cycle"] in current_cycles:
+                    try:
+                        size, _, mtime = os.stat(
+                            os.path.join(user_suite_dir, path))[6:9]
+                    except (IndexError, OSError):
+                        continue
+                    path_in_tar = None
+                    exists = True
+                elif entry["cycle"] in targzip_cycles:
+                    path_in_tar = path
+                    path = os.path.join("log", "job-%(cycle)s.tar.gz" % entry)
+                    exists = True
+                else:
+                    path_in_tar = None
+                    exists = False
+                entry["logs"][filename] = {
+                    "path": path,
+                    "path_in_tar": path_in_tar,
+                    "mtime": mtime,
+                    "size": size,
+                    "exists": exists,
+                    "seq_key": None}
+            # Sequential logs
             for seq_key, indexes in entry["seq_logs_indexes"].items():
                 if len(indexes) <= 1:
                     entry["seq_logs_indexes"].pop(seq_key)
@@ -505,19 +582,20 @@ class CylcProcessor(SuiteEngineProcessor):
             return ([], 0)
         # Execute query to get entries
         entries = []
-        stmt = ("SELECT" +
-                " cycle, name, task_events.submit_num AS submit_num," +
-                " group_concat(time), group_concat(event)," +
-                " group_concat(message) " +
-                " FROM" +
-                " task_events JOIN task_states USING (cycle,name)" +
-                " WHERE" +
-                " (event==? OR event==? OR event==? OR" +
-                "  event==? OR event==? OR event==? OR event==?)" +
-                where +
-                " GROUP BY cycle, name, task_events.submit_num" +
-                " ORDER BY " +
-                self.JOB_ORDERS.get(order, self.JOB_ORDERS["time_desc"]))
+        stmt = (
+            "SELECT" +
+            " cycle, name, task_events.submit_num AS submit_num," +
+            " group_concat(time), group_concat(event)," +
+            " group_concat(message) " +
+            " FROM" +
+            " task_events JOIN task_states USING (cycle,name)" +
+            " WHERE" +
+            " (event==? OR event==? OR event==? OR" +
+            "  event==? OR event==? OR event==? OR event==?)" +
+            where +
+            " GROUP BY cycle, name, task_events.submit_num" +
+            " ORDER BY " +
+            self.JOB_ORDERS_OLD.get(order, self.JOB_ORDERS_OLD["time_desc"]))
         stmt_args_head = [
             "submitting now", "incrementing submit number",
             "submission failed", "started", "succeeded", "failed", "signaled"]
@@ -773,7 +851,7 @@ class CylcProcessor(SuiteEngineProcessor):
                 " sum(" + fail_events_stmt + ") AS n_job_fail" +
                 " FROM task_events GROUP BY cycle")
         for cycle, n_job_fail in self._db_exec(
-                self.SUITE_DB, user_name, suite_name, stmt, stmt_args):
+                self.SUITE_DB, user_name, suite_name, stmt):
             try:
                 entry_of[cycle]["n_states"]["job_fails"] = n_job_fail
             except KeyError:
@@ -790,11 +868,14 @@ class CylcProcessor(SuiteEngineProcessor):
           the time of the latest activity in the suite
         * is_running is a boolean to indicate if the suite is running
         * is_failed: a boolean to indicate if any tasks (submit) failed
+        * server: host:port of server, if available
 
         """
-        ret = {"last_activity_time": None,
-               "is_running": False,
-               "is_failed": False}
+        ret = {
+            "last_activity_time": None,
+            "is_running": False,
+            "is_failed": False,
+            "server": None}
         dao = self._db_init(self.SUITE_DB, user_name, suite_name)
         if not os.access(dao.db_f_name, os.F_OK | os.R_OK):
             return ret
@@ -803,7 +884,16 @@ class CylcProcessor(SuiteEngineProcessor):
             ret["last_activity_time"] = row[0]
             break
 
-        ret["is_running"] = bool(self.is_suite_running(user_name, suite_name))
+        port_file_path = os.path.expanduser(
+            os.path.join("~" + user_name, ".cylc", "ports", suite_name))
+        try:
+            port_str, host = open(port_file_path).read().splitlines()
+        except (IOError, ValueError):
+            ret["is_running"] = bool(
+                self.is_suite_running(user_name, suite_name))
+        else:
+            ret["is_running"] = True
+            ret["server"] = host.split(".", 1)[0] + ":" + port_str
 
         stmt = "SELECT status FROM task_states WHERE status GLOB ? LIMIT 1"
         stmt_args = ["*failed"]
